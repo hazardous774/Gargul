@@ -9,17 +9,19 @@ GL.RollerUI = GL.RollerUI or {
 };
 local RollerUI = GL.RollerUI; ---@type RollerUI
 
+-- Ensure GargulPlus1 tables exist
+GargulPlus1 = GargulPlus1 or {}
+GargulPlus1.buffStatus = GargulPlus1.buffStatus or {}
+GargulPlus1.secondRollPrefs = GargulPlus1.secondRollPrefs or {}
+
 ---@return boolean
 function RollerUI:show(time, itemLink, itemIcon, note, SupportedRolls, bth)
     if (self.Window and self.Window:IsShown()) then
         return false;
     end
 
-    -- Make sure we can adjust the roller UI accordingly when a player can't use the item
     GL:canUserUseItem(itemLink, function (userCanUseItem)
-        if (not userCanUseItem
-            and GL.Settings:get("Rolling.dontShowOnUnusableItems", false)
-        ) then
+        if (not userCanUseItem and GL.Settings:get("Rolling.dontShowOnUnusableItems", false)) then
             return false;
         end
 
@@ -29,16 +31,9 @@ function RollerUI:show(time, itemLink, itemIcon, note, SupportedRolls, bth)
     return true;
 end
 
---- Note: we're not using AceGUI here since getting a SimpleGroup to move properly is a friggin nightmare
----
----@param time number The duration of the RollOff
----@param itemLink string
----@param itemIcon string
----@param note string
----@return boolean
 function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUseItem, bth)
     local Window = CreateFrame("Frame", "GargulUI_RollerUI_Window", UIParent, Frame);
-    Window:SetSize(350, 48);
+    Window:SetSize(350, 68); -- a bit taller to fit checkbox
     Window:SetPoint(GL.Interface:getPosition("Roller"));
 
     Window:SetMovable(true);
@@ -52,16 +47,14 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
         GL.Interface:storePosition(Window, "Roller");
     end);
     Window:SetScript("OnMouseDown", function (_, button)
-        -- Close the roll window on right-click
         if (button == "RightButton") then
             self:hide();
             return;
         end
-
         HandleModifiedItemClick(itemLink, button);
     end);
     Window:SetScale(GL.Settings:get("Rolling.scale", 1));
-    Window.ownedByGargul = true; -- We used this in the tooltip check later
+    Window.ownedByGargul = true;
     self.Window = Window;
 
     local Texture = Window:CreateTexture(nil,"BACKGROUND");
@@ -69,10 +62,19 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
     Texture:SetAllPoints(Window)
     Window.texture = Texture;
 
+    -- PLUS1: show “+1 Eligible” label if buffed
+    local myName = GL.User.fqn or UnitName("player")
+    local buffed = GargulPlus1.buffStatus[myName]
+    if buffed then
+        local plus1Text = Window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        plus1Text:SetPoint("BOTTOMLEFT", Window, "TOPLEFT", 10, 0)
+        plus1Text:SetText("|cFF00FF00+1 Eligible|r: You may opt in for an extra roll!")
+    end
+
     local RollButtons = {};
     local numberOfButtons = #SupportedRolls;
-
     local rollerUIWidth = 0;
+
     for i = 1, numberOfButtons do
         local RollDetails = SupportedRolls[i] or {};
 
@@ -80,12 +82,8 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
         local min = math.floor(tonumber(RollDetails[2]) or 0);
         local max = math.floor(tonumber(RollDetails[3]) or 0);
 
-        -- There are no more buttons to display
-        if (GL:empty(identifier)) then
-            break;
-        end
+        if (GL:empty(identifier)) then break; end
 
-        -- Roll button
         local Button = CreateFrame("Button", nil, Window, "GameMenuButtonTemplate");
         local buttonWidth = math.max(string.len(identifier) * 12, 70);
         rollerUIWidth = rollerUIWidth + buttonWidth + 4;
@@ -97,19 +95,22 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
         if (not userCanUseItem) then
             Button:Disable();
             Button:SetMotionScriptsWhileDisabled(true);
-
-            -- Make sure rolling is still possible in case something was amiss!
-            Button:SetScript("OnEnter", function()
-                Button:Enable();
-            end);
-
-            Button:SetScript("OnLeave", function()
-                Button:Disable();
-            end);
+            Button:SetScript("OnEnter", function() Button:Enable(); end);
+            Button:SetScript("OnLeave", function() Button:Disable(); end);
         end
 
         Button:SetScript("OnClick", function ()
             RandomRoll(min, max);
+
+            -- Store +1 choice if buffed and checkbox is ticked
+            if buffed and Window.plus1Checkbox and Window.plus1Checkbox:GetChecked() then
+                GargulPlus1.secondRollPrefs[itemLink] = GargulPlus1.secondRollPrefs[itemLink] or {}
+                GargulPlus1.secondRollPrefs[itemLink][myName] = true
+            else
+                if GargulPlus1.secondRollPrefs[itemLink] then
+                    GargulPlus1.secondRollPrefs[itemLink][myName] = false
+                end
+            end
 
             if (GL.Settings:get("Rolling.closeAfterRoll")) then
                 self:hide();
@@ -141,6 +142,7 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
         tinsert(RollButtons, Button);
     end
 
+    -- Pass button
     local PassButton = CreateFrame("Button", "GargulUI_RollerUI_Pass", Window, "GameMenuButtonTemplate");
     PassButton:SetPoint("TOPRIGHT", Window, "TOPRIGHT", -3, -1);
     PassButton:SetSize(50, 20);
@@ -154,10 +156,25 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
     rollerUIWidth = math.max(rollerUIWidth + 54, 350);
     Window:SetWidth(rollerUIWidth);
 
+    -- PLUS1: add opt-in checkbox if buffed
+    if buffed then
+        local plus1Checkbox = CreateFrame("CheckButton", nil, Window, "UICheckButtonTemplate")
+        plus1Checkbox:SetSize(20, 20)
+        plus1Checkbox:SetPoint("BOTTOMRIGHT", Window, "BOTTOMRIGHT", -10, 25)
+        plus1Checkbox:SetScript("OnClick", function(self)
+            GargulPlus1.secondRollPrefs[itemLink] = GargulPlus1.secondRollPrefs[itemLink] or {}
+            GargulPlus1.secondRollPrefs[itemLink][myName] = self:GetChecked()
+        end)
+
+        local cbText = Window:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        cbText:SetPoint("LEFT", plus1Checkbox, "RIGHT", 2, 0)
+        cbText:SetText("Use +1 extra roll for this item")
+        Window.plus1Checkbox = plus1Checkbox
+    end
+
     ---@type Frame
     local IdentityWindow, position = GL.Interface.Identity:buildForRoller(bth);
     IdentityWindow:SetParent(Window);
-
     if (type(position) ~= "function") then
         IdentityWindow:SetPoint("TOPLEFT", Window, "TOPRIGHT", 0, 0);
     else
@@ -167,18 +184,8 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
     self:drawCountdownBar(time, itemLink, itemIcon, note, userCanUseItem, rollerUIWidth);
 end
 
---- Draw the countdown bar
----
----@param time number
----@param itemLink string
----@param itemIcon string
----@param note string
----@return void
 function RollerUI:drawCountdownBar(time, itemLink, itemIcon, note, userCanUseItem, width)
-    -- This shouldn't be possible but you never know!
-    if (not self.Window) then
-        return false;
-    end
+    if (not self.Window) then return false; end
 
     local TimerBar = LibStub("LibCandyBarGargul-3.0"):New(
         "Interface/AddOns/Gargul/Assets/Textures/timer-bar",
@@ -191,15 +198,11 @@ function RollerUI:drawCountdownBar(time, itemLink, itemIcon, note, userCanUseIte
     TimerBar:SetPoint("BOTTOM", self.Window, "BOTTOM");
     TimerBar.candyBarLabel:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE");
 
-    -- Make the bar turn green/yellow/red based on time left
     TimerBar:AddUpdateFunction(function (Bar)
         if (not userCanUseItem) then
-            TimerBar:SetColor(0, 0, 0, .1);
-            return;
+            TimerBar:SetColor(0, 0, 0, .1); return;
         end
-
         local percentageLeft = 100 / (time / Bar.remaining);
-
         if (percentageLeft >= 60) then
             Bar:SetColor(0, 1, 0, .3);
         elseif (percentageLeft >= 30) then
@@ -209,29 +212,17 @@ function RollerUI:drawCountdownBar(time, itemLink, itemIcon, note, userCanUseIte
         end
     end);
 
-    -- Close the roll window on rightclick
     TimerBar:SetScript("OnMouseDown", function(_, button)
-        if (button == "RightButton") then
-            self:hide();
-        end
+        if (button == "RightButton") then self:hide(); end
     end)
 
     TimerBar:SetDuration(time);
-
-    -- Reset color to green or disabled
-    if (userCanUseItem) then
-        TimerBar:SetColor(0, 1, 0, .3);
-    else
-        TimerBar:SetColor(0, 0, 0, .1);
-    end
-
+    TimerBar:SetColor(userCanUseItem and 0 or 0, userCanUseItem and 1 or 0, userCanUseItem and 0 or 0, .3);
     note = note or "";
     TimerBar:SetLabel("  " .. itemLink);
-
     if (not userCanUseItem) then
         TimerBar:SetLabel(("  |c00FFFFFF%s|r"):format(L["You can't use this item!"]));
     end
-
     TimerBar:SetIcon(itemIcon);
     TimerBar:Set("type", "ROLLER_UI_COUNTDOWN");
     TimerBar:Start();
@@ -240,62 +231,39 @@ function RollerUI:drawCountdownBar(time, itemLink, itemIcon, note, userCanUseIte
     local itemTooltipIsShowing = false;
     local refreshTooltip = function ()
         GameTooltip:Hide();
-
-        if (not self.Window) then
-            return;
-        end
-
+        if (not self.Window) then return; end
         GameTooltip:SetOwner(self.Window, "ANCHOR_TOP");
         GameTooltip:SetHyperlink(itemLink);
         GameTooltip:Show();
         itemTooltipIsShowing = true;
     end;
 
-    -- Show a gametooltip for the item up for roll
-    -- when hovering over the progress bar
     TimerBar:SetScript("OnEnter", function()
         lastShiftStatus = IsShiftKeyDown();
-
         GameTooltip:SetOwner(self.Window, "ANCHOR_TOP");
         GameTooltip:SetHyperlink(itemLink);
         GameTooltip:Show();
         itemTooltipIsShowing = true;
     end);
-
     TimerBar:SetScript("OnLeave", function()
         GameTooltip:Hide();
         itemTooltipIsShowing = false;
     end);
 
     GL.Events:register("RollerUIModifierStateChanged", "MODIFIER_STATE_CHANGED", function (_, key, pressed)
-        if (not itemTooltipIsShowing
-            or (key ~= "LSHIFT" and key ~= "RSHIFT")
-        ) then
-            return;
-        end
-
-        if (lastShiftStatus ~= pressed) then
-            refreshTooltip();
-            lastShiftStatus = pressed;
-        end
+        if (not itemTooltipIsShowing or (key ~= "LSHIFT" and key ~= "RSHIFT")) then return; end
+        if (lastShiftStatus ~= pressed) then refreshTooltip(); lastShiftStatus = pressed; end
     end);
 end
 
----@return void
 function RollerUI:hide()
     GL.Events:unregister("RollerUIModifierStateChanged");
-
-    if (not self.Window) then
-        return;
-    end
-
-    -- We can't release the timer bar because it will be reused later
+    if (not self.Window) then return; end
     if (self.TimerBar and self.TimerBar.SetParent) then
         self.TimerBar:SetParent(UIParent);
         self.TimerBar:Stop();
         self.TimerBar = nil;
     end
-
     GL.Interface:release(self.Window);
     self.Window = nil;
 end
