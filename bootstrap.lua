@@ -43,6 +43,22 @@ GL.loadedOn = 32503680000; -- Year 3000
 
 -- Register our addon with the Ace framework
 GL.Ace = LibStub("AceAddon-3.0"):NewAddon(GL.name, "AceConsole-3.0", "AceComm-3.0", "AceTimer-3.0");
+-- PLUS1 buff tracking tables
+GargulPlus1 = GargulPlus1 or {}
+GargulPlus1.buffStatus = {}
+GargulPlus1.secondRollPrefs = {}
+
+-- Register PLUS1BUFFS prefix
+C_ChatInfo.RegisterAddonMessagePrefix("PLUS1BUFFS")
+
+local plus1Frame = CreateFrame("Frame")
+plus1Frame:RegisterEvent("CHAT_MSG_ADDON")
+plus1Frame:SetScript("OnEvent", function(_, _, prefix, text, _, sender)
+    if prefix == "PLUS1BUFFS" then
+        local player, status = strsplit(":", text)
+        GargulPlus1.buffStatus[player] = (status == "1")
+    end
+end)
 
 -- Bootstrap the addon
 function GL:bootstrap(_, _, addonName)
