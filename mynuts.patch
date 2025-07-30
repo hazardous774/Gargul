@@ -1,0 +1,91 @@
+
+*** a/bootstrap.lua
+--- b/bootstrap.lua
+@@ -32,6 +32,23 @@
+ GL.Ace = LibStub("AceAddon-3.0"):NewAddon(GL.name, "AceConsole-3.0", "AceComm-3.0", "AceTimer-3.0");
++
++-- PLUS1 buff tracking tables
++GargulPlus1 = GargulPlus1 or {}
++GargulPlus1.buffStatus = GargulPlus1.buffStatus or {}
++GargulPlus1.secondRollPrefs = GargulPlus1.secondRollPrefs or {}
++
++-- Register PLUS1BUFFS prefix
++C_ChatInfo.RegisterAddonMessagePrefix("PLUS1BUFFS")
++
++local plus1Frame = CreateFrame("Frame")
++plus1Frame:RegisterEvent("CHAT_MSG_ADDON")
++plus1Frame:SetScript("OnEvent", function(_, _, prefix, text, _, sender)
++    if prefix == "PLUS1BUFFS" then
++        local player, status = strsplit(":", text)
++        GargulPlus1.buffStatus[player] = (status == "1")
++    end
++end)
+*** a/classes/RollOff.lua
+--- b/classes/RollOff.lua
+@@ -246,6 +246,26 @@ function RollOff:processRoll(message)
+     if (not Roll) then
+         return;
+     end
++
++    -- Insert the normal roll
++    tinsert(self.CurrentRollOff.Rolls, Roll)
++
++    -- PLUS1 EXTRA ROLL LOGIC:
++    if self:startedByMe() then
++        local itemLink = self.CurrentRollOff.itemLink
++        if GargulPlus1.buffStatus[Roll.player]
++            and GargulPlus1.secondRollPrefs[itemLink]
++            and GargulPlus1.secondRollPrefs[itemLink][Roll.player]
++        then
++            local secondRoll = {
++                player = Roll.player,
++                class = Roll.class,
++                amount = math.random(1,100),
++                time = GetServerTime(),
++                classification = Roll.classification,
++                priority = Roll.priority,
++                bonus = true,
++            }
++            tinsert(self.CurrentRollOff.Rolls, secondRoll)
++            print("|cFF00FF00PLUS1: Extra roll added for " .. Roll.player .. "|r")
++        end
++    end
+*** a/classes/RollerUI.lua
+--- b/classes/RollerUI.lua
+@@ -38,6 +38,32 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
+     Window:SetScale(GL.Settings:get("Rolling.scale", 1));
+     Window.ownedByGargul = true; -- We used this in the tooltip check later
+     self.Window = Window;
++
++    -- PLUS1 integration: indicate eligibility and add a checkbox
++    GargulPlus1 = GargulPlus1 or {}
++    GargulPlus1.buffStatus = GargulPlus1.buffStatus or {}
++    GargulPlus1.secondRollPrefs = GargulPlus1.secondRollPrefs or {}
++
++    local myName = GL.User.fqn or UnitName("player")
++    local buffed = GargulPlus1.buffStatus[myName]
++    if buffed then
++        local plus1Text = Window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
++        plus1Text:SetPoint("BOTTOMLEFT", Window, "TOPLEFT", 10, 0)
++        plus1Text:SetText("|cFF00FF00+1 Eligible|r: You may opt in for an extra roll!")
++    end
++
+@@ -112,6 +138,20 @@ function RollerUI:draw(time, itemLink, itemIcon, note, SupportedRolls, userCanUs
+     rollerUIWidth = math.max(rollerUIWidth + 54, 350);
+     Window:SetWidth(rollerUIWidth);
++
++    -- PLUS1: add opt-in checkbox if buffed
++    if buffed then
++        local plus1Checkbox = CreateFrame("CheckButton", nil, Window, "UICheckButtonTemplate")
++        plus1Checkbox:SetSize(20, 20)
++        plus1Checkbox:SetPoint("BOTTOMRIGHT", Window, "BOTTOMRIGHT", -10, 25)
++        plus1Checkbox:SetScript("OnClick", function(self)
++            GargulPlus1.secondRollPrefs[itemLink] = GargulPlus1.secondRollPrefs[itemLink] or {}
++            GargulPlus1.secondRollPrefs[itemLink][myName] = self:GetChecked()
++        end)
++
++        local cbText = Window:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
++        cbText:SetPoint("LEFT", plus1Checkbox, "RIGHT", 2, 0)
++        cbText:SetText("Use +1 extra roll for this item")
++        Window.plus1Checkbox = plus1Checkbox
++    end
